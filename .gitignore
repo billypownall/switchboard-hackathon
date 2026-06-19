@@ -1,0 +1,50 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor and IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Dependencies
+node_modules/
+vendor/
+
+# Build outputs
+dist/
+build/
+out/
+target/
+coverage/
+
+# Caches
+.cache/
+.parcel-cache/
+.turbo/
+.next/
+.nuxt/
+
+# Runtime files
+*.pid
+*.seed
+*.pid.lock
+*.db
+*.db-journal
+
+/generated/prisma
