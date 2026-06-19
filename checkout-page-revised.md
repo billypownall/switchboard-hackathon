@@ -1,0 +1,14 @@
+- generic [active] [ref=e1] [box=0,0,1280,720]:
+  - banner [ref=e2] [box=0,0,1280,61]:
+    - navigation [ref=e3] [box=64,0,1152,60]:
+      - link "QuickCart" [ref=e4] [cursor=pointer] [box=88,16,96,28]:
+        - /url: /
+      - generic [ref=e5] [box=1006,20,186,20]
+  - main [ref=e9] [box=64,61,1152,489]:
+    - generic [ref=e10] [box=88,101,1104,409]:
+      - generic [ref=e11] [box=88,101,692,409]
+      - complementary [ref=e32] [box=812,101,380,409]
+  - button "Feedback" [ref=e50] [box=1146,648,110,48]
+  - button "Open Next.js Dev Tools" [ref=e56] [cursor=pointer] [box=22,666,32,32]:
+    - img [ref=e57] [box=22,662,40,40]
+  - alert [ref=e60] [box=-1,549,1,1]

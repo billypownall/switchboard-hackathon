@@ -1,3 +1,5 @@
+import Image from "next/image";
+import { ReproduceButton } from "@/components/ReproduceButton";
 import { prisma } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +21,53 @@ function parseJsonStringArray(value: string | null) {
   try {
     const parsed = JSON.parse(value);
     return Array.isArray(parsed) ? parsed.filter((entry) => typeof entry === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+type ReproOutcome = {
+  reproduced?: boolean;
+  confidence?: number;
+  narrative?: string;
+  observedVsExpected?: string;
+};
+
+type ReproTraceEntry = {
+  ts?: string;
+  stepNumber?: number | null;
+  text?: string | null;
+  toolCalls?: Array<{
+    toolName?: string;
+    inputSummary?: string;
+  }>;
+  toolResults?: Array<{
+    toolName?: string;
+    outputSummary?: string;
+  }>;
+};
+
+function parseJsonObject(value: string | null): ReproOutcome | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? (parsed as ReproOutcome) : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseTrace(value: string | null): ReproTraceEntry[] {
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? (parsed as ReproTraceEntry[]) : [];
   } catch {
     return [];
   }
@@ -88,6 +137,10 @@ export default async function DashboardPage() {
           {reports.map((report) => {
             const consoleErrors = parseConsoleErrors(report.consoleErrors);
             const reproSteps = parseJsonStringArray(report.reproSteps);
+            const reproTrace = parseTrace(report.reproTrace);
+            const reproOutcome = parseJsonObject(report.reproOutcome);
+            const screenshots = parseJsonStringArray(report.screenshots);
+            const reproductionConsoleOutput = parseJsonStringArray(report.consoleOutput);
 
             return (
               <article
@@ -181,6 +234,142 @@ export default async function DashboardPage() {
                         <span className="font-semibold">User answer:</span>{" "}
                         {report.followUpAnswer}
                       </p>
+                    ) : null}
+                  </section>
+                ) : null}
+
+                {report.classification === "bug" ? (
+                  <section className="mt-5 rounded-xl border border-cyan-100 bg-cyan-50 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-4">
+                      <div>
+                        <h3 className="text-sm font-bold uppercase tracking-wide text-cyan-800">
+                          Browser reproduction
+                        </h3>
+                        <p className="mt-1 text-sm text-cyan-950">
+                          Status:{" "}
+                          <span className="font-bold">
+                            {report.reproStatus ?? "not started"}
+                          </span>
+                        </p>
+                        {report.reproStatus === "running" ? (
+                          <p className="mt-1 text-sm font-semibold text-cyan-800">
+                            Running in a fresh Playwright MCP browser session...
+                          </p>
+                        ) : null}
+                      </div>
+                      <ReproduceButton
+                        disabled={report.reproStatus === "running"}
+                        reportId={report.id}
+                      />
+                    </div>
+
+                    {reproOutcome ? (
+                      <div className="mt-4 rounded-xl bg-white/80 p-4">
+                        <p className="text-sm font-bold uppercase tracking-wide text-slate-500">
+                          Verdict
+                        </p>
+                        <p className="mt-2 font-bold text-slate-950">
+                          {reproOutcome.reproduced ? "Reproduced" : "Not reproduced"}
+                          {typeof reproOutcome.confidence === "number"
+                            ? ` · ${Math.round(reproOutcome.confidence * 100)}% confidence`
+                            : ""}
+                        </p>
+                        {reproOutcome.narrative ? (
+                          <p className="mt-2 text-sm text-slate-800">{reproOutcome.narrative}</p>
+                        ) : null}
+                        {reproOutcome.observedVsExpected ? (
+                          <p className="mt-2 text-sm text-slate-700">
+                            <span className="font-semibold">Observed vs expected:</span>{" "}
+                            {reproOutcome.observedVsExpected}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {screenshots.length > 0 ? (
+                      <div className="mt-4">
+                        <p className="text-sm font-bold uppercase tracking-wide text-cyan-800">
+                          Screenshots
+                        </p>
+                        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                          {screenshots.map((screenshot) => (
+                            <a
+                              className="block overflow-hidden rounded-xl border border-cyan-100 bg-white"
+                              href={screenshot}
+                              key={screenshot}
+                              rel="noreferrer"
+                              target="_blank"
+                            >
+                              <Image
+                                alt="Reproduction evidence screenshot"
+                                className="h-auto w-full"
+                                height={360}
+                                src={screenshot}
+                                width={640}
+                              />
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {reproTrace.length > 0 ? (
+                      <details className="mt-4 rounded-xl border border-cyan-100 bg-white/80 p-4" open>
+                        <summary className="cursor-pointer text-sm font-bold uppercase tracking-wide text-cyan-800">
+                          Step trace ({reproTrace.length})
+                        </summary>
+                        <ol className="mt-4 space-y-3">
+                          {reproTrace.map((entry, index) => (
+                            <li className="rounded-lg bg-slate-50 p-3 text-sm" key={`${report.id}-trace-${index}`}>
+                              <p className="font-bold text-slate-950">
+                                Step {entry.stepNumber ?? index + 1}
+                              </p>
+                              {entry.text ? (
+                                <p className="mt-1 text-slate-700">{entry.text}</p>
+                              ) : null}
+                              {entry.toolCalls?.length ? (
+                                <div className="mt-2">
+                                  <p className="font-semibold text-slate-700">Tool calls</p>
+                                  <ul className="mt-1 list-disc space-y-1 pl-5 text-slate-600">
+                                    {entry.toolCalls.map((call, callIndex) => (
+                                      <li key={`${report.id}-call-${index}-${callIndex}`}>
+                                        {call.toolName ?? "unknown_tool"}:{" "}
+                                        {call.inputSummary ?? "no input summary"}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              ) : null}
+                              {entry.toolResults?.length ? (
+                                <div className="mt-2">
+                                  <p className="font-semibold text-slate-700">Tool results</p>
+                                  <ul className="mt-1 list-disc space-y-1 pl-5 text-slate-600">
+                                    {entry.toolResults.map((result, resultIndex) => (
+                                      <li key={`${report.id}-result-${index}-${resultIndex}`}>
+                                        {result.toolName ?? "unknown_tool"}:{" "}
+                                        {result.outputSummary ?? "no output summary"}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              ) : null}
+                            </li>
+                          ))}
+                        </ol>
+                      </details>
+                    ) : null}
+
+                    {reproductionConsoleOutput.length > 0 ? (
+                      <details className="mt-4 rounded-xl border border-cyan-100 bg-white/80 p-4">
+                        <summary className="cursor-pointer text-sm font-bold uppercase tracking-wide text-cyan-800">
+                          Reproduction console output ({reproductionConsoleOutput.length})
+                        </summary>
+                        <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-700">
+                          {reproductionConsoleOutput.map((line, index) => (
+                            <li key={`${report.id}-repro-console-${index}`}>{line}</li>
+                          ))}
+                        </ul>
+                      </details>
                     ) : null}
                   </section>
                 ) : null}

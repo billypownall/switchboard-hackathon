@@ -1,25 +1,25 @@
 ---
-name: "M2 — Reproduction agent (happy path)"
-overview: "Wire Playwright MCP as a stdio child process via the Vercel AI SDK, run a multi-step generateText tool loop that drives the browser, force a structured verdict via a record_outcome tool, persist trace/screenshots/console, and render evidence on the dashboard."
+name: M2 — Reproduction agent (happy path)
+overview: Wire Playwright MCP as a stdio child process via the Vercel AI SDK, run a multi-step generateText tool loop that drives the browser, force a structured verdict via a record_outcome tool, persist trace/screenshots/console, and render evidence on the dashboard.
 todos:
   - id: deps
-    content: "Install @playwright/mcp and chromium; choose a stronger reproduction model."
-    status: pending
+    content: Install @playwright/mcp and chromium; choose a stronger reproduction model.
+    status: completed
   - id: schema
-    content: "Extend Report with reproStatus, reproTrace, reproOutcome, screenshots, consoleOutput; migrate."
-    status: pending
+    content: Extend Report with reproStatus, reproTrace, reproOutcome, screenshots, consoleOutput; migrate.
+    status: completed
   - id: reproduce-lib
     content: "Add lib/reproduce.ts: experimental_createMCPClient (stdio) + Experimental_StdioMCPTransport, generateText loop with mcpTools + record_outcome, stopWhen stepCountIs, onStepFinish trace, mcp.close in finally."
-    status: pending
+    status: completed
   - id: system-prompt
     content: "Write the reproduction system prompt: base URL + route map + triage output + snapshot/self-correct tactics."
-    status: pending
+    status: completed
   - id: route
-    content: "Add async POST /api/reports/[id]/reproduce (nodejs runtime, maxDuration) writing reproStatus and persisting outcome/screenshots/console."
-    status: pending
+    content: Add async POST /api/reports/[id]/reproduce (nodejs runtime, maxDuration) writing reproStatus and persisting outcome/screenshots/console.
+    status: completed
   - id: dashboard
-    content: "Add Reproduce button on bug rows; detail view with trace timeline, screenshots, console errors, verdict."
-    status: pending
+    content: Add Reproduce button on bug rows; detail view with trace timeline, screenshots, console errors, verdict.
+    status: completed
 isProject: false
 ---
 

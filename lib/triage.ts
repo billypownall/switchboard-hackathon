@@ -7,11 +7,11 @@ export const TriageSchema = z.object({
   classification: z.enum(["bug", "feature_request", "unclear"]),
   summary: z.string(),
   confidence: z.number().min(0).max(1),
-  severity: z.enum(["critical", "high", "medium", "low"]).optional(),
-  affectedArea: z.string().optional(),
-  reproSteps: z.array(z.string()).optional(),
-  suggestedPriority: z.enum(["p0", "p1", "p2", "p3"]).optional(),
-  followUpQuestion: z.string().optional(),
+  severity: z.enum(["critical", "high", "medium", "low"]).nullable(),
+  affectedArea: z.string().nullable(),
+  reproSteps: z.array(z.string()).nullable(),
+  suggestedPriority: z.enum(["p0", "p1", "p2", "p3"]).nullable(),
+  followUpQuestion: z.string().nullable(),
 });
 
 export type TriageResult = z.infer<typeof TriageSchema>;
@@ -25,6 +25,30 @@ export type ReportInput = {
   consoleErrors: string;
   followUpAnswer?: string | null;
 };
+
+export function logTriageDebug(event: string, details: Record<string, unknown> = {}) {
+  console.info(`[triage] ${event}`, details);
+}
+
+function getConsoleErrorCount(consoleErrors: string) {
+  try {
+    const parsed = JSON.parse(consoleErrors);
+    return Array.isArray(parsed) ? parsed.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function summarizeReportForLogs(report: ReportInput) {
+  return {
+    pageUrl: report.pageUrl,
+    hasFollowUpAnswer: Boolean(report.followUpAnswer),
+    consoleErrorCount: getConsoleErrorCount(report.consoleErrors),
+    whatHappenedLength: report.whatHappened.length,
+    expectedLength: report.expected.length,
+    stepsLength: report.steps.length,
+  };
+}
 
 const TRIAGE_SYSTEM = `
 You are a triage engineer for QuickCart.
@@ -65,28 +89,28 @@ function normalizeTriage(result: TriageResult): TriageResult {
       severity: result.severity ?? "medium",
       affectedArea: result.affectedArea ?? "QuickCart",
       reproSteps: result.reproSteps?.length ? result.reproSteps : ["Review the submitted steps."],
-      suggestedPriority: undefined,
-      followUpQuestion: undefined,
+      suggestedPriority: null,
+      followUpQuestion: null,
     };
   }
 
   if (result.classification === "feature_request") {
     return {
       ...result,
-      severity: undefined,
-      affectedArea: undefined,
-      reproSteps: undefined,
+      severity: null,
+      affectedArea: null,
+      reproSteps: null,
       suggestedPriority: result.suggestedPriority ?? "p3",
-      followUpQuestion: undefined,
+      followUpQuestion: null,
     };
   }
 
   return {
     ...result,
-    severity: undefined,
-    affectedArea: undefined,
-    reproSteps: undefined,
-    suggestedPriority: undefined,
+    severity: null,
+    affectedArea: null,
+    reproSteps: null,
+    suggestedPriority: null,
     followUpQuestion:
       result.followUpQuestion ??
       "Can you share the exact page and steps you took before the issue happened?",
@@ -112,7 +136,11 @@ function fallbackTriage(report: ReportInput): TriageResult {
       classification: "feature_request",
       summary: report.whatHappened,
       confidence: 0.74,
+      severity: null,
+      affectedArea: null,
+      reproSteps: null,
       suggestedPriority: text.includes("payment") || text.includes("paypal") ? "p2" : "p3",
+      followUpQuestion: null,
     };
   }
 
@@ -128,6 +156,8 @@ function fallbackTriage(report: ReportInput): TriageResult {
         .split(/\n|\. /)
         .map((step) => step.trim())
         .filter(Boolean),
+      suggestedPriority: null,
+      followUpQuestion: null,
     };
   }
 
@@ -135,23 +165,66 @@ function fallbackTriage(report: ReportInput): TriageResult {
     classification: "unclear",
     summary: "The report does not include enough detail to classify confidently.",
     confidence: 0.5,
+    severity: null,
+    affectedArea: null,
+    reproSteps: null,
+    suggestedPriority: null,
     followUpQuestion: "What page were you on, and what exact steps led to the problem?",
   };
 }
 
 export async function triage(report: ReportInput): Promise<TriageResult> {
+  logTriageDebug("started", summarizeReportForLogs(report));
+
   if (!process.env.OPENAI_API_KEY) {
-    return normalizeTriage(fallbackTriage(report));
+    logTriageDebug("using local fallback classifier", {
+      reason: "OPENAI_API_KEY is not set",
+    });
+
+    const result = normalizeTriage(fallbackTriage(report));
+    logTriageDebug("completed", {
+      source: "fallback",
+      classification: result.classification,
+      severity: result.severity,
+      suggestedPriority: result.suggestedPriority,
+      confidence: result.confidence,
+    });
+
+    return result;
   }
 
+  const model = process.env.TRIAGE_MODEL ?? "gpt-4o-mini";
+  logTriageDebug("calling llm", {
+    provider: "openai",
+    model,
+  });
+
   const { object } = await generateObject({
-    model: openai(process.env.TRIAGE_MODEL ?? "gpt-4o-mini"),
+    model: openai(model),
     schema: TriageSchema,
     system: TRIAGE_SYSTEM,
     prompt: formatReport(report),
   });
 
-  return normalizeTriage(object);
+  logTriageDebug("llm returned", {
+    classification: object.classification,
+    severity: object.severity,
+    suggestedPriority: object.suggestedPriority,
+    confidence: object.confidence,
+  });
+
+  const result = normalizeTriage(object);
+  logTriageDebug("completed", {
+    source: "llm",
+    classification: result.classification,
+    severity: result.severity,
+    suggestedPriority: result.suggestedPriority,
+    confidence: result.confidence,
+    hasFollowUpQuestion: Boolean(result.followUpQuestion),
+    reproStepCount: result.reproSteps?.length ?? 0,
+  });
+
+  return result;
 }
 
 export function statusForTriage(classification: TriageResult["classification"]) {

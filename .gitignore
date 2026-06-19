@@ -46,5 +46,6 @@ coverage/
 *.pid.lock
 *.db
 *.db-journal
+public/repro-output/
 
 /generated/prisma

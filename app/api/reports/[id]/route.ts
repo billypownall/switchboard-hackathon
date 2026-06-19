@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { triage } from "@/lib/triage";
+import { logTriageDebug, triage } from "@/lib/triage";
 import { triageToReportData } from "@/lib/triagePersistence";
 
 export const runtime = "nodejs";
@@ -25,6 +25,10 @@ export async function GET(_request: Request, context: RouteContext) {
   });
 
   if (!report) {
+    logTriageDebug("report lookup failed", {
+      reportId: id,
+    });
+
     return NextResponse.json({ error: "Report not found." }, { status: 404 });
   }
 
@@ -37,6 +41,11 @@ export async function PATCH(request: Request, context: RouteContext) {
   const parsed = FollowUpSchema.safeParse(body);
 
   if (!parsed.success) {
+    logTriageDebug("rejected invalid follow-up payload", {
+      reportId: id,
+      issues: parsed.error.issues.length,
+    });
+
     return NextResponse.json(
       {
         error: "Invalid follow-up payload.",
@@ -46,6 +55,11 @@ export async function PATCH(request: Request, context: RouteContext) {
     );
   }
 
+  logTriageDebug("received follow-up answer", {
+    reportId: id,
+    answerLength: parsed.data.followUpAnswer.length,
+  });
+
   const reportWithAnswer = await prisma.report.update({
     where: {
       id,
@@ -54,6 +68,11 @@ export async function PATCH(request: Request, context: RouteContext) {
       followUpAnswer: parsed.data.followUpAnswer,
     },
   });
+  logTriageDebug("stored follow-up answer", {
+    reportId: id,
+    previousStatus: reportWithAnswer.status,
+    previousClassification: reportWithAnswer.classification,
+  });
 
   const result = await triage(reportWithAnswer);
   const report = await prisma.report.update({
@@ -61,6 +80,13 @@ export async function PATCH(request: Request, context: RouteContext) {
       id,
     },
     data: triageToReportData(result),
+  });
+  logTriageDebug("stored follow-up triage result", {
+    reportId: report.id,
+    status: report.status,
+    classification: report.classification,
+    severity: report.severity,
+    suggestedPriority: report.suggestedPriority,
   });
 
   return NextResponse.json(report);

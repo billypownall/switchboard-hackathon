@@ -29,5 +29,10 @@ model Report {
   suggestedPriority String?
   followUpQuestion  String?
   followUpAnswer    String?
+  reproStatus        String?
+  reproTrace         String?
+  reproOutcome       String?
+  screenshots        String?
+  consoleOutput      String?
   createdAt         DateTime @default(now())
 }

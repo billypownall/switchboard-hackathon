@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { triage } from "@/lib/triage";
+import { logTriageDebug, triage } from "@/lib/triage";
 import { triageToReportData } from "@/lib/triagePersistence";
 
 export const runtime = "nodejs";
@@ -20,6 +20,10 @@ export async function POST(request: Request) {
   const parsed = ReportSchema.safeParse(body);
 
   if (!parsed.success) {
+    logTriageDebug("rejected invalid report payload", {
+      issues: parsed.error.issues.length,
+    });
+
     return NextResponse.json(
       {
         error: "Invalid report payload.",
@@ -29,18 +33,38 @@ export async function POST(request: Request) {
     );
   }
 
+  logTriageDebug("received report submission", {
+    pageUrl: parsed.data.pageUrl,
+    consoleErrorCount: parsed.data.consoleErrors.length,
+    whatHappenedLength: parsed.data.whatHappened.length,
+    expectedLength: parsed.data.expected.length,
+    stepsLength: parsed.data.steps.length,
+  });
+
   const rawReport = await prisma.report.create({
     data: {
       ...parsed.data,
       consoleErrors: JSON.stringify(parsed.data.consoleErrors),
     },
   });
+  logTriageDebug("stored raw report", {
+    reportId: rawReport.id,
+    status: rawReport.status,
+  });
+
   const result = await triage(rawReport);
   const report = await prisma.report.update({
     where: {
       id: rawReport.id,
     },
     data: triageToReportData(result),
+  });
+  logTriageDebug("stored triage result", {
+    reportId: report.id,
+    status: report.status,
+    classification: report.classification,
+    severity: report.severity,
+    suggestedPriority: report.suggestedPriority,
   });
 
   return NextResponse.json(report, { status: 201 });
