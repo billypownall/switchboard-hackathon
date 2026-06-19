@@ -4,12 +4,18 @@ WORKDIR /app
 
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV DATABASE_URL=file:/data/dev.db
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # NODE_ENV is intentionally NOT set to production yet: npm ci must install
 # devDependencies (tailwindcss, @tailwindcss/postcss, postcss) so `next build`
 # can process globals.css.
 COPY package.json package-lock.json ./
 RUN npm ci
+
+# @playwright/mcp pins a playwright-core version newer than the base image's
+# bundled browsers, so install the Chromium build that matches node_modules.
+# Otherwise the reproduction agent fails with "Chromium/Chrome missing".
+RUN npx playwright install --with-deps chromium
 
 COPY . .
 RUN npx prisma generate

@@ -205,7 +205,8 @@ export function BugReportWidget() {
               <label className="block">
                 <span className="text-sm font-semibold text-slate-700">What happened?</span>
                 <textarea
-                  className="mt-2 min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2"
+                  className="mt-2 min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500"
+                  disabled={Boolean(submittedReport)}
                   onChange={(event) => updateField("whatHappened", event.target.value)}
                   required
                   value={form.whatHappened}
@@ -216,7 +217,8 @@ export function BugReportWidget() {
                   What did you expect?
                 </span>
                 <textarea
-                  className="mt-2 min-h-20 w-full rounded-xl border border-slate-300 px-3 py-2"
+                  className="mt-2 min-h-20 w-full rounded-xl border border-slate-300 px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500"
+                  disabled={Boolean(submittedReport)}
                   onChange={(event) => updateField("expected", event.target.value)}
                   required
                   value={form.expected}
@@ -225,7 +227,8 @@ export function BugReportWidget() {
               <label className="block">
                 <span className="text-sm font-semibold text-slate-700">Steps you took</span>
                 <textarea
-                  className="mt-2 min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2"
+                  className="mt-2 min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500"
+                  disabled={Boolean(submittedReport)}
                   onChange={(event) => updateField("steps", event.target.value)}
                   placeholder="Example: added espresso maker, applied SAVE10, changed quantity to 2..."
                   required
@@ -283,11 +286,12 @@ export function BugReportWidget() {
                   ) : null}
 
                   <Link
-                    className="mt-2 inline-flex text-green-950 underline underline-offset-4 hover:text-green-700"
+                    className="flex w-full items-center justify-center gap-2 rounded-full bg-green-700 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-green-800"
                     href={`/dashboard/${submittedReport.id}`}
                     onClick={dismiss}
                   >
                     View this issue on the dashboard
+                    <span aria-hidden>&rarr;</span>
                   </Link>
                 </div>
               ) : null}
@@ -297,13 +301,15 @@ export function BugReportWidget() {
                 </p>
               ) : null}
 
-              <button
-                className="w-full rounded-full bg-cyan-500 px-5 py-3 font-bold text-white hover:bg-cyan-600 disabled:cursor-not-allowed disabled:bg-slate-300"
-                disabled={isSubmitting}
-                type="submit"
-              >
-                {isSubmitting ? "Submitting..." : "Submit report"}
-              </button>
+              {submittedReport ? null : (
+                <button
+                  className="w-full rounded-full bg-cyan-500 px-5 py-3 font-bold text-white hover:bg-cyan-600 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  disabled={isSubmitting}
+                  type="submit"
+                >
+                  {isSubmitting ? "Submitting..." : "Submit report"}
+                </button>
+              )}
             </form>
           </div>
         </div>
