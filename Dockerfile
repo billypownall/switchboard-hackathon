@@ -11,6 +11,7 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 # can process globals.css.
 COPY package.json package-lock.json ./
 RUN npm ci
+RUN npx playwright install --with-deps chromium
 
 COPY . .
 RUN npx prisma generate
