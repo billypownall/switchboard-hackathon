@@ -1,4 +1,0 @@
-- main [ref=e9] [box=64,61,1152,489]:
-  - generic [ref=e10] [box=88,101,1104,409]:
-    - generic [ref=e11] [box=88,101,692,409]
-    - complementary [ref=e32] [box=812,101,380,409]

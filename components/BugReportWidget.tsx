@@ -75,6 +75,13 @@ export function BugReportWidget() {
     setForm((current) => ({ ...current, [field]: value }));
   }
 
+  function dismiss() {
+    setIsOpen(false);
+    setSubmittedReport(null);
+    setError(null);
+    setFollowUpAnswer("");
+  }
+
   async function submitReport(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsSubmitting(true);
@@ -278,6 +285,7 @@ export function BugReportWidget() {
                   <Link
                     className="mt-2 inline-flex text-green-950 underline underline-offset-4 hover:text-green-700"
                     href={`/dashboard#report-${submittedReport.id}`}
+                    onClick={dismiss}
                   >
                     View this issue on the dashboard
                   </Link>

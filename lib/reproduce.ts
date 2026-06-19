@@ -1,4 +1,4 @@
-import { mkdir, readdir } from "node:fs/promises";
+import { mkdir, readdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { openai } from "@ai-sdk/openai";
 import { createMCPClient } from "@ai-sdk/mcp";
@@ -7,12 +7,14 @@ import { generateText, stepCountIs, tool } from "ai";
 import { z } from "zod";
 import { QUICKCART_APP_CONTEXT, QUICKCART_BASE_URL } from "@/lib/appContext";
 import { prisma } from "@/lib/db";
+import { createJiraBug, getJiraConfig, logJiraDebug } from "@/lib/jira";
 
 type ReproOutcome = {
   reproduced: boolean;
   confidence: number;
   narrative: string;
   observedVsExpected: string;
+  stepsSummary: string;
 };
 
 type ReproTraceEntry = {
@@ -47,7 +49,16 @@ const OutcomeSchema = z.object({
   confidence: z.number().min(0).max(1),
   narrative: z.string(),
   observedVsExpected: z.string(),
+  stepsSummary: z
+    .string()
+    .describe(
+      "A concise plain-English summary (2-4 sentences) of the steps you actually performed in the browser and what you observed at each key point.",
+    ),
 });
+
+const REPRO_STEP_LIMIT = 30;
+const REPRO_TIMEOUT_MS = Number(process.env.REPRO_TIMEOUT_MS ?? 120_000);
+const REPRO_OUTPUT_RETENTION_MS = Number(process.env.REPRO_OUTPUT_RETENTION_MS ?? 1000 * 60 * 60 * 24);
 
 export function logReproduceDebug(event: string, details: Record<string, unknown> = {}) {
   console.info(`[reproduce] ${event}`, details);
@@ -121,7 +132,7 @@ Required browser tactics:
 - Prefer normal user interactions over browser_evaluate.
 - When you observe the failing state, call browser_take_screenshot and browser_console_messages to capture evidence. It captures the whole page automatically; do NOT pass a filename, target, or element.
 - If relevant, call browser_network_requests before the final verdict.
-- Finish by calling record_outcome exactly once. Always fill observedVsExpected with what you actually saw versus what the user expected.
+- Finish by calling record_outcome exactly once. Always fill observedVsExpected with what you actually saw versus what the user expected, and fill stepsSummary with a concise plain-English recap (2-4 sentences) of the steps you performed and what you observed.
 - If you genuinely cannot reproduce it after following all the steps, record what you tried and why it failed.
 `.trim();
 }
@@ -136,6 +147,12 @@ Steps: ${report.steps}
 
 Navigate the app, follow the parsed steps from triage, gather evidence, and call record_outcome.
 `.trim();
+}
+
+function buildCorrectivePrompt(report: ReportForRepro) {
+  return `${buildPrompt(report)}
+
+The previous attempt appeared stuck or incomplete. Start over from a fresh page, follow each parsed step exactly once, do not repeat successful actions, and call record_outcome only after checking the final page state.`;
 }
 
 async function appendTrace(reportId: string, entry: ReproTraceEntry) {
@@ -161,6 +178,38 @@ async function appendTrace(reportId: string, entry: ReproTraceEntry) {
       reproTrace: JSON.stringify(trace),
     },
   });
+}
+
+async function cleanupOldOutputDirs(currentReportId: string) {
+  const outputRoot = path.join(process.cwd(), "public", "repro-output");
+
+  try {
+    await mkdir(outputRoot, { recursive: true });
+    const entries = await readdir(outputRoot, { withFileTypes: true });
+    const now = Date.now();
+
+    await Promise.all(
+      entries
+        .filter((entry) => entry.isDirectory() && entry.name !== currentReportId)
+        .map(async (entry) => {
+          const entryPath = path.join(outputRoot, entry.name);
+          const stats = await stat(entryPath);
+
+          if (now - stats.mtimeMs > REPRO_OUTPUT_RETENTION_MS) {
+            await rm(entryPath, { recursive: true, force: true });
+            logReproduceDebug("cleaned old output directory", {
+              reportId: currentReportId,
+              removed: entry.name,
+            });
+          }
+        }),
+    );
+  } catch (error) {
+    logReproduceDebug("output cleanup skipped", {
+      reportId: currentReportId,
+      error: error instanceof Error ? error.message : "unknown",
+    });
+  }
 }
 
 function parseTrace(value: string | null): ReproTraceEntry[] {
@@ -231,6 +280,140 @@ function extractConsoleOutput(trace: ReproTraceEntry[]) {
   );
 }
 
+function toolCallSignature(entry: ReproTraceEntry) {
+  return entry.toolCalls.map((call) => `${call.toolName}:${call.inputSummary}`).join("|");
+}
+
+function shouldRetryForStuckTrace(trace: ReproTraceEntry[], outcome: ReproOutcome | null) {
+  if (outcome?.reproduced) {
+    return false;
+  }
+
+  const toolEntries = trace.filter((entry) => entry.toolCalls.length > 0);
+  const lastSignatures = toolEntries.slice(-4).map(toolCallSignature);
+  const repeatedLastActions =
+    lastSignatures.length >= 3 && new Set(lastSignatures.filter(Boolean)).size === 1;
+
+  const snapshotLinkOnlyCount = trace.filter((entry) =>
+    entry.toolResults.some(
+      (result) =>
+        result.toolName === "browser_snapshot" && result.outputSummary.includes("[Snapshot]("),
+    ),
+  ).length;
+
+  const interactionErrorCount = trace.filter((entry) =>
+    entry.toolResults.some(
+      (result) =>
+        (result.toolName.startsWith("browser_") || result.toolName === "unknown_tool") &&
+        result.outputSummary.includes("### Error"),
+    ),
+  ).length;
+
+  return repeatedLastActions || snapshotLinkOnlyCount >= 2 || interactionErrorCount >= 3;
+}
+
+type ReportForTicket = {
+  id: string;
+  whatHappened: string;
+  expected: string;
+  pageUrl: string;
+  triageSummary: string | null;
+  severity: string | null;
+  affectedArea: string | null;
+  reproSteps: string | null;
+};
+
+async function fileJiraTicket(
+  report: ReportForTicket,
+  outcome: ReproOutcome,
+  screenshotUrls: string[],
+  consoleOutput: string[],
+) {
+  if (!getJiraConfig()) {
+    logJiraDebug("skipped (not configured)", { reportId: report.id });
+    await prisma.report.update({
+      where: { id: report.id },
+      data: { ticketStatus: "skipped" },
+    });
+    return;
+  }
+
+  const screenshotPaths = screenshotUrls.map((url) =>
+    path.join(process.cwd(), "public", url.replace(/^\//, "")),
+  );
+
+  const summary = `[QuickCart] ${report.triageSummary ?? report.whatHappened}`.slice(0, 240);
+
+  try {
+    const ticket = await createJiraBug({
+      reportId: report.id,
+      summary,
+      severity: report.severity,
+      affectedArea: report.affectedArea,
+      pageUrl: report.pageUrl,
+      whatHappened: report.whatHappened,
+      expected: report.expected,
+      observedVsExpected: outcome.observedVsExpected,
+      narrative: outcome.narrative,
+      reproSteps: parseStringArray(report.reproSteps),
+      consoleOutput,
+      screenshotPaths,
+    });
+
+    await prisma.report.update({
+      where: { id: report.id },
+      data: {
+        ticketStatus: "filed",
+        ticketId: ticket.id,
+        ticketKey: ticket.key,
+        ticketUrl: ticket.url,
+        ticketError: null,
+        failureReason: null,
+      },
+    });
+    logJiraDebug("ticket stored", { reportId: report.id, key: ticket.key });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown Jira error.";
+    logJiraDebug("ticket creation failed", { reportId: report.id, error: message });
+    await prisma.report.update({
+      where: { id: report.id },
+      data: {
+        ticketStatus: "failed",
+        ticketError: message,
+        failureReason: null,
+      },
+    });
+  }
+}
+
+// Mark a report as running and dispatch the (long-lived) reproduction in the
+// background so the HTTP request can return immediately.
+export async function startReproduction(reportId: string) {
+  const updated = await prisma.report.update({
+    where: { id: reportId },
+    data: {
+      reproStatus: "running",
+      reproTrace: JSON.stringify([]),
+      reproOutcome: null,
+      screenshots: JSON.stringify([]),
+      consoleOutput: JSON.stringify([]),
+      ticketStatus: null,
+      ticketId: null,
+      ticketKey: null,
+      ticketUrl: null,
+      ticketError: null,
+      failureReason: null,
+    },
+  });
+
+  setTimeout(() => {
+    logReproduceDebug("dispatching async reproduction", { reportId });
+    void reproduceReport(reportId);
+  }, 0);
+
+  return updated;
+}
+
 type ExecutableTool = { execute?: (input: unknown, options: unknown) => unknown };
 
 // Wrap one MCP tool so we strip the given input keys before it runs.
@@ -263,7 +446,8 @@ function stripToolInputKeys<T extends Record<string, unknown>>(
   };
 }
 
-// gpt-4o fights the tool schemas in two ways that leave us with nothing to show:
+// The reproduction model sometimes fights the tool schemas in two ways that
+// leave us with nothing to show:
 // 1. browser_snapshot with a `filename`/`target` writes the tree to disk and
 //    returns only a link, so the model is driving blind.
 // 2. browser_take_screenshot with a `filename` saves to the server cwd (project
@@ -294,6 +478,7 @@ function fallbackOutcome(text: string): ReproOutcome {
       text ||
       "The reproduction run completed without calling record_outcome, so no reliable verdict was captured.",
     observedVsExpected: "No structured observed-vs-expected comparison was recorded.",
+    stepsSummary: text || "The agent did not record a summary of the steps it took.",
   };
 }
 
@@ -337,6 +522,7 @@ export async function reproduceReport(reportId: string) {
           confidence: 1,
           narrative: "Reproduction can only run for bug-classified reports.",
           observedVsExpected: "This report is not classified as a bug.",
+          stepsSummary: "No browser session was started.",
         } satisfies ReproOutcome),
       },
     });
@@ -358,6 +544,7 @@ export async function reproduceReport(reportId: string) {
           confidence: 1,
           narrative: "OPENAI_API_KEY is not set, so the browser-driving LLM could not run.",
           observedVsExpected: "No browser session was started.",
+          stepsSummary: "No browser session was started.",
         } satisfies ReproOutcome),
       },
     });
@@ -366,6 +553,7 @@ export async function reproduceReport(reportId: string) {
 
   const outputDir = path.join(process.cwd(), "public", "repro-output", reportId);
   await mkdir(outputDir, { recursive: true });
+  await cleanupOldOutputDirs(reportId);
   logReproduceDebug("prepared output directory", {
     reportId,
     outputDir,
@@ -427,34 +615,47 @@ export async function reproduceReport(reportId: string) {
       sanitizedSnapshot: typeof rawMcpTools.browser_snapshot !== "undefined",
     });
 
-    const model = process.env.REPRO_MODEL ?? "gpt-4o";
+    const model = process.env.REPRO_MODEL ?? "gpt-5.1";
     logReproduceDebug("calling reproduction llm", {
       reportId,
       model,
-      stopStepCount: 30,
+      stopStepCount: REPRO_STEP_LIMIT,
+      timeoutMs: REPRO_TIMEOUT_MS,
     });
 
-    const result = await generateText({
-      model: openai(model),
-      system: buildReproSystemPrompt(report),
-      prompt: buildPrompt(report),
-      tools: {
-        ...mcpTools,
-        record_outcome: recordOutcome,
-      },
-      stopWhen: stepCountIs(30),
-      onStepFinish: async (step) => {
-        const entry = traceEntryFromStep(step);
-        logReproduceDebug("agent step finished", {
-          reportId,
-          stepNumber: entry.stepNumber,
-          textLength: entry.text?.length ?? 0,
-          toolCalls: entry.toolCalls.map((call) => call.toolName),
-          toolResults: entry.toolResults.map((toolResult) => toolResult.toolName),
+    const runAgentAttempt = async (prompt: string, system: string) => {
+      const abortController = new AbortController();
+      const timeout = setTimeout(() => abortController.abort(), REPRO_TIMEOUT_MS);
+
+      try {
+        return await generateText({
+          model: openai(model),
+          system,
+          prompt,
+          tools: {
+            ...mcpTools,
+            record_outcome: recordOutcome,
+          },
+          stopWhen: stepCountIs(REPRO_STEP_LIMIT),
+          abortSignal: abortController.signal,
+          onStepFinish: async (step) => {
+            const entry = traceEntryFromStep(step);
+            logReproduceDebug("agent step finished", {
+              reportId,
+              stepNumber: entry.stepNumber,
+              textLength: entry.text?.length ?? 0,
+              toolCalls: entry.toolCalls.map((call) => call.toolName),
+              toolResults: entry.toolResults.map((toolResult) => toolResult.toolName),
+            });
+            await appendTrace(reportId, entry);
+          },
         });
-        await appendTrace(reportId, entry);
-      },
-    });
+      } finally {
+        clearTimeout(timeout);
+      }
+    };
+
+    let result = await runAgentAttempt(buildPrompt(report), buildReproSystemPrompt(report));
     logReproduceDebug("llm loop completed", {
       reportId,
       finishReason: result.finishReason,
@@ -462,12 +663,49 @@ export async function reproduceReport(reportId: string) {
       recordedOutcome: Boolean(recordedOutcome),
     });
 
-    const traceRecord = await prisma.report.findUnique({
+    let traceRecord = await prisma.report.findUnique({
       where: { id: reportId },
       select: { reproTrace: true },
     });
-    const trace = parseTrace(traceRecord?.reproTrace ?? null);
-    const outcome = recordedOutcome ?? fallbackOutcome(result.text);
+    let trace = parseTrace(traceRecord?.reproTrace ?? null);
+    let outcome = recordedOutcome ?? fallbackOutcome(result.text);
+
+    if (shouldRetryForStuckTrace(trace, recordedOutcome)) {
+      logReproduceDebug("stuck trace detected; retrying with corrective prompt", {
+        reportId,
+        traceStepCount: trace.length,
+        recordedOutcome: Boolean(recordedOutcome),
+      });
+      await appendTrace(reportId, {
+        ts: new Date().toISOString(),
+        stepNumber: null,
+        text: "Detected a stuck or incomplete browser run; retrying once with corrective instructions.",
+        toolCalls: [],
+        toolResults: [],
+      });
+      recordedOutcome = null;
+
+      result = await runAgentAttempt(
+        buildCorrectivePrompt(report),
+        `${buildReproSystemPrompt(report)}
+
+Corrective retry: the prior attempt was stuck. Use fresh snapshots, do not repeat the same action loop, and complete the user-provided sequence before deciding.`,
+      );
+      logReproduceDebug("corrective llm loop completed", {
+        reportId,
+        finishReason: result.finishReason,
+        textLength: result.text.length,
+        recordedOutcome: Boolean(recordedOutcome),
+      });
+
+      traceRecord = await prisma.report.findUnique({
+        where: { id: reportId },
+        select: { reproTrace: true },
+      });
+      trace = parseTrace(traceRecord?.reproTrace ?? null);
+      outcome = recordedOutcome ?? fallbackOutcome(result.text);
+    }
+
     const screenshots = await listScreenshotUrls(outputDir, reportId);
     const consoleOutput = extractConsoleOutput(trace);
     logReproduceDebug("collected evidence", {
@@ -492,6 +730,22 @@ export async function reproduceReport(reportId: string) {
       reproStatus: outcome.reproduced ? "reproduced" : "not_reproduced",
       confidence: outcome.confidence,
     });
+
+    if (outcome.reproduced) {
+      await fileJiraTicket(report, outcome, screenshots, consoleOutput);
+    } else {
+      await prisma.report.update({
+        where: { id: reportId },
+        data: {
+          ticketStatus: "escalated",
+          failureReason: outcome.narrative,
+        },
+      });
+      logReproduceDebug("stored failure escalation", {
+        reportId,
+        failureReasonLength: outcome.narrative.length,
+      });
+    }
   } catch (error) {
     logReproduceDebug("failed", {
       reportId,
@@ -502,11 +756,14 @@ export async function reproduceReport(reportId: string) {
       where: { id: reportId },
       data: {
         reproStatus: "error",
+        ticketStatus: "escalated",
+        failureReason: error instanceof Error ? error.message : "Unknown reproduction error.",
         reproOutcome: JSON.stringify({
           reproduced: false,
           confidence: 0,
           narrative: error instanceof Error ? error.message : "Unknown reproduction error.",
           observedVsExpected: "The reproduction agent failed before producing a verdict.",
+          stepsSummary: "The reproduction agent failed before producing a verdict.",
         } satisfies ReproOutcome),
       },
     });

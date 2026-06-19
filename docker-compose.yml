@@ -1,0 +1,20 @@
+services:
+  quickcart:
+    build: .
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env.local
+    environment:
+      DATABASE_URL: file:/data/dev.db
+      QUICKCART_BASE_URL: http://localhost:3000
+      NODE_ENV: production
+    volumes:
+      - quickcart-data:/data
+      - quickcart-repro-output:/app/public/repro-output
+    command: >
+      sh -c "npx prisma migrate deploy && npm run start"
+
+volumes:
+  quickcart-data:
+  quickcart-repro-output:

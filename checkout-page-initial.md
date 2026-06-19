@@ -1,7 +1,0 @@
-- document [ref=e61] [box=0,0,1280,720]:
-  - generic [active] [ref=e1] [box=0,0,1280,720]:
-    - banner [ref=e2] [box=0,0,1280,61]
-    - main [ref=e9] [box=64,61,1152,489]
-    - button "Feedback" [ref=e50] [box=1146,648,110,48]
-    - button "Open Next.js Dev Tools" [ref=e56] [cursor=pointer] [box=22,666,32,32]
-    - alert [ref=e60] [box=-1,549,1,1]

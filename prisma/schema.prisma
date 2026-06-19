@@ -34,5 +34,11 @@ model Report {
   reproOutcome       String?
   screenshots        String?
   consoleOutput      String?
+  ticketStatus       String?
+  ticketId           String?
+  ticketKey          String?
+  ticketUrl          String?
+  ticketError        String?
+  failureReason      String?
   createdAt         DateTime @default(now())
 }

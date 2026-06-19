@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "eslint",
     "demo:script": "node scripts/demo-scenarios.mjs",
+    "demo:seed": "node scripts/demo-seed.mjs",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev"
   },

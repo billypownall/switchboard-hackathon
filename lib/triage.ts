@@ -193,7 +193,7 @@ export async function triage(report: ReportInput): Promise<TriageResult> {
     return result;
   }
 
-  const model = process.env.TRIAGE_MODEL ?? "gpt-4o-mini";
+  const model = process.env.TRIAGE_MODEL ?? "gpt-5.1";
   logTriageDebug("calling llm", {
     provider: "openai",
     model,

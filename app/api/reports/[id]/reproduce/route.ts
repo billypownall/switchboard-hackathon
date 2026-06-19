@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { logReproduceDebug, reproduceReport } from "@/lib/reproduce";
+import { logReproduceDebug, startReproduction } from "@/lib/reproduce";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -45,29 +45,11 @@ export async function POST(_request: Request, context: RouteContext) {
     );
   }
 
-  const updatedReport = await prisma.report.update({
-    where: {
-      id,
-    },
-    data: {
-      reproStatus: "running",
-      reproTrace: JSON.stringify([]),
-      reproOutcome: null,
-      screenshots: JSON.stringify([]),
-      consoleOutput: JSON.stringify([]),
-    },
-  });
+  const updatedReport = await startReproduction(id);
   logReproduceDebug("route marked report running", {
     reportId: id,
     previousReproStatus: report.reproStatus,
   });
-
-  setTimeout(() => {
-    logReproduceDebug("route dispatching async reproduction", {
-      reportId: id,
-    });
-    void reproduceReport(id);
-  }, 0);
 
   return NextResponse.json(updatedReport, { status: 202 });
 }

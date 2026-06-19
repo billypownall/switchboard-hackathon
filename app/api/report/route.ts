@@ -3,6 +3,9 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { logTriageDebug, triage } from "@/lib/triage";
 import { triageToReportData } from "@/lib/triagePersistence";
+import { logReproduceDebug, startReproduction } from "@/lib/reproduce";
+
+export const maxDuration = 300;
 
 export const runtime = "nodejs";
 
@@ -66,6 +69,14 @@ export async function POST(request: Request) {
     severity: report.severity,
     suggestedPriority: report.suggestedPriority,
   });
+
+  if (report.classification === "bug") {
+    logReproduceDebug("auto-starting reproduction after triage", {
+      reportId: report.id,
+    });
+    const runningReport = await startReproduction(report.id);
+    return NextResponse.json(runningReport, { status: 201 });
+  }
 
   return NextResponse.json(report, { status: 201 });
 }

@@ -1,4 +1,5 @@
 import Image from "next/image";
+import { DashboardAutoRefresh } from "@/components/DashboardAutoRefresh";
 import { ReproduceButton } from "@/components/ReproduceButton";
 import { prisma } from "@/lib/db";
 
@@ -31,6 +32,7 @@ type ReproOutcome = {
   confidence?: number;
   narrative?: string;
   observedVsExpected?: string;
+  stepsSummary?: string;
 };
 
 type ReproTraceEntry = {
@@ -111,9 +113,11 @@ export default async function DashboardPage() {
       createdAt: "desc",
     },
   });
+  const hasRunningReproduction = reports.some((report) => report.reproStatus === "running");
 
   return (
     <div className="space-y-8">
+      <DashboardAutoRefresh enabled={hasRunningReproduction} />
       <div>
         <p className="text-sm font-semibold uppercase tracking-[0.25em] text-cyan-700">
           Report dashboard
@@ -286,6 +290,49 @@ export default async function DashboardPage() {
                       </div>
                     ) : null}
 
+                    {report.ticketStatus === "filed" && report.ticketKey ? (
+                      <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                        <p className="text-sm font-bold uppercase tracking-wide text-emerald-700">
+                          Jira ticket filed
+                        </p>
+                        <a
+                          className="mt-2 inline-flex font-bold text-emerald-900 underline underline-offset-4 hover:text-emerald-700"
+                          href={report.ticketUrl ?? "#"}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          {report.ticketKey}
+                        </a>
+                        <p className="mt-1 text-sm text-emerald-800">
+                          Bug created automatically with reproduction evidence attached.
+                        </p>
+                      </div>
+                    ) : null}
+
+                    {report.ticketStatus === "failed" ? (
+                      <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4">
+                        <p className="text-sm font-bold uppercase tracking-wide text-red-700">
+                          Jira ticket failed
+                        </p>
+                        <p className="mt-1 text-sm text-red-800">{report.ticketError}</p>
+                      </div>
+                    ) : null}
+
+                    {report.ticketStatus === "escalated" && report.failureReason ? (
+                      <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                        <p className="text-sm font-bold uppercase tracking-wide text-amber-800">
+                          Failure analysis escalated
+                        </p>
+                        <p className="mt-2 text-sm text-amber-950">
+                          The browser agent could not confidently reproduce this report. It has been
+                          escalated for human review.
+                        </p>
+                        <p className="mt-2 text-sm text-amber-900">
+                          <span className="font-semibold">Why:</span> {report.failureReason}
+                        </p>
+                      </div>
+                    ) : null}
+
                     {screenshots.length > 0 ? (
                       <div className="mt-4">
                         <p className="text-sm font-bold uppercase tracking-wide text-cyan-800">
@@ -313,8 +360,19 @@ export default async function DashboardPage() {
                       </div>
                     ) : null}
 
+                    {reproOutcome?.stepsSummary ? (
+                      <div className="mt-4 rounded-xl bg-white/80 p-4">
+                        <p className="text-sm font-bold uppercase tracking-wide text-cyan-800">
+                          What the agent did
+                        </p>
+                        <p className="mt-2 text-sm text-slate-800">
+                          {reproOutcome.stepsSummary}
+                        </p>
+                      </div>
+                    ) : null}
+
                     {reproTrace.length > 0 ? (
-                      <details className="mt-4 rounded-xl border border-cyan-100 bg-white/80 p-4" open>
+                      <details className="mt-4 rounded-xl border border-cyan-100 bg-white/80 p-4">
                         <summary className="cursor-pointer text-sm font-bold uppercase tracking-wide text-cyan-800">
                           Step trace ({reproTrace.length})
                         </summary>
