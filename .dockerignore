@@ -6,3 +6,5 @@ prisma/dev.db-journal
 .git
 .cursor
 *.log
+.env
+.env.*

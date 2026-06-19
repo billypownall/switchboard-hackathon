@@ -16,20 +16,23 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <header className="border-b border-slate-200 bg-white/80 backdrop-blur">
-          <nav className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-            <Link className="text-xl font-bold text-slate-950" href="/">
-              QuickCart
+        <header className="border-b border-[#e3e4e9] bg-white">
+          <nav className="mx-auto flex max-w-6xl items-center gap-3 px-6 py-3.5">
+            <Link className="flex items-center gap-2.5" href="/">
+              <span className="jack" aria-hidden />
+              <span className="mono-label text-[13px] font-semibold text-[#16191f]">
+                QuickCart
+              </span>
             </Link>
-            <div className="flex items-center gap-4 text-sm font-medium text-slate-600">
-              <Link className="hover:text-slate-950" href="/cart">
+            <div className="ml-auto flex items-center gap-5 text-[11px] font-medium">
+              <Link className="mono-label text-[#6a7180] hover:text-[#16191f]" href="/cart">
                 Cart
               </Link>
-              <Link className="hover:text-slate-950" href="/checkout">
+              <Link className="mono-label text-[#6a7180] hover:text-[#16191f]" href="/checkout">
                 Checkout
               </Link>
-              <Link className="hover:text-slate-950" href="/dashboard">
-                Dashboard
+              <Link className="mono-label text-[#6a7180] hover:text-[#16191f]" href="/dashboard">
+                Console
               </Link>
             </div>
           </nav>
