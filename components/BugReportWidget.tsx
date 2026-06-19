@@ -284,7 +284,7 @@ export function BugReportWidget() {
 
                   <Link
                     className="mt-2 inline-flex text-green-950 underline underline-offset-4 hover:text-green-700"
-                    href={`/dashboard#report-${submittedReport.id}`}
+                    href={`/dashboard/${submittedReport.id}`}
                     onClick={dismiss}
                   >
                     View this issue on the dashboard

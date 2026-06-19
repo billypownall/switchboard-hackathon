@@ -22,9 +22,11 @@ Playwright image, Chromium preinstalled) so any container host works.
    - `JIRA_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_PROJECT_KEY` — required to file bugs.
    - Optional: `REPRO_MODEL` (default `gpt-5.1`), `TRIAGE_MODEL` (default `gpt-5.1`),
      `REPRO_TIMEOUT_MS` (default `120000`).
-   - **Do not** set `NEXT_PUBLIC_APP_URL` — `scripts/start.sh` points the agent at
-     `http://localhost:$PORT` inside the container, which is correct since the app
-     and agent run in the same process.
+   - `NEXT_PUBLIC_APP_URL` is auto-derived: `scripts/start.sh` uses Railway's
+     injected `RAILWAY_PUBLIC_DOMAIN` (e.g. `https://<app>.up.railway.app`) so the
+     reproduction agent navigates the real deployed URL. Set `NEXT_PUBLIC_APP_URL`
+     explicitly only if you want to override that (e.g. a custom domain). Locally it
+     falls back to `http://localhost:$PORT`.
 
 4. **Deploy.** On boot, `scripts/start.sh` runs `prisma migrate deploy` against the
    `/data` volume and then `next start` on Railway's injected `$PORT`. Railway gives
